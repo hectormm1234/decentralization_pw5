@@ -2,6 +2,21 @@ import bodyParser from "body-parser";
 import express from "express";
 import { BASE_NODE_PORT } from "../config";
 import { Value, NodeState } from "../types";
+import { delay } from "../utils";
+
+async function broadcastMessage(N: number, basePath: string, message: object) {
+  const fetchPromises = [];
+  for (let i = 0; i < N; i++) {
+    const fetchPromise = fetch(`http://localhost:${BASE_NODE_PORT + i}${basePath}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(message),
+    }).catch(err => console.error(`Error sending message to node ${i}:`, err));
+    fetchPromises.push(fetchPromise);
+  }
+  await Promise.all(fetchPromises);
+}
+
 
 export async function node(
   nodeId: number, // the ID of the node
@@ -65,9 +80,32 @@ export async function node(
 
   // TODO implement this
   // this route is used to start the consensus algorithm
-  // node.get("/start", async (req, res) => {});
+  node.get("/start", async (req, res) => {
+    while (!nodesAreReady()) {
+      await delay(5);
+    }
 
+    if (!isFaulty) {
+      currentNodeState.k = 1;
+      currentNodeState.x = initialValue;
+      currentNodeState.decided = false;
 
+      const message = {
+        k: currentNodeState.k,
+        x: currentNodeState.x,
+        nodeId: nodeId, // Assuming you want to know who sent the message
+        messageType: "propose"
+      };
+
+      await broadcastMessage(N, "/message", message);
+    } else {
+      currentNodeState = { killed: true, x: null, decided: null, k: null };
+    }
+
+    res.status(200).send("Consensus algorithm started.");
+  });
+
+  
   // start the server
   const server = node.listen(BASE_NODE_PORT + nodeId, async () => {
     console.log(
